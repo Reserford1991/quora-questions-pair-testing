@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from nltk.corpus import stopwords
+from collections import Counter
 
 
 class HelperFunctions:
@@ -181,6 +182,8 @@ class HelperFunctions:
         plt.title('Label distribution over word_match_share', fontsize=15)
         plt.xlabel('word_match_share', fontsize=15)
 
+        return train_word_match
+
     @staticmethod
     def word_match_share(row, stops):
         q1words = {}
@@ -206,3 +209,98 @@ class HelperFunctions:
             (len(q1words) + len(q2words))
 
         return R
+
+    # If a word appears only once, we ignore it completely (likely a typo)
+    # Epsilon defines a smoothing constant,
+    # which makes the effect of extremely rare words smaller
+    @staticmethod
+    def get_weight(count: int, eps: int = 1000, min_count: int = 2):
+        """
+        Get word weight in the text
+
+        Args:
+            count (int): Number of word appearances in text.
+            eps (int, optional): smoothing constant.
+            min_count (int, optional): Minimal word count in text.
+                                        Defaults to 2.
+
+        Returns:
+            word weight
+        """
+        if count < min_count:
+            return 0
+        else:
+            return 1 / (count + eps)
+
+    @staticmethod
+    def show_common_words_and_weights(qs_series: pd.Series):
+        """
+        Show words weights is text
+
+        Args:
+            qs_series (pd.Series): questions series
+        """
+
+        words = (" ".join(qs_series)).lower().split()
+        counts = Counter(words)
+        weights = {
+            word: HelperFunctions.get_weight(count)
+            for word, count in counts.items()
+        }
+
+        print('Most common words and weights: \n')
+        print(sorted(weights.items(),
+              key=lambda x: x[1] if x[1] > 0 else 9999)[:10])
+        print('\nLeast common words and weights: ')
+        print(sorted(weights.items(), key=lambda x: x[1], reverse=True)[:10])
+
+        return weights
+
+    @staticmethod
+    def tfidf_word_match_share(row, weights):
+        q1words = {}
+        q2words = {}
+        stops = set(stopwords.words("english"))
+
+        for word in str(row['question1']).lower().split():
+            if word not in stops:
+                q1words[word] = 1
+        for word in str(row['question2']).lower().split():
+            if word not in stops:
+                q2words[word] = 1
+        if len(q1words) == 0 or len(q2words) == 0:
+            # The computer-generated chaff includes a few questions
+            # that are nothing but stopwords
+            return 0
+
+        shared_weights = [
+            weights.get(w, 0) for w in q1words.keys()
+            if w in q2words] + [weights.get(w, 0) for w in q2words.keys()
+                                if w in q1words
+                                ]
+        total_weights = [weights.get(w, 0) for w in q1words] + \
+            [weights.get(w, 0) for w in q2words]
+
+        R = np.sum(shared_weights) / np.sum(total_weights)
+        return R
+
+    @staticmethod
+    def show_tlidf_match_share(df: pd.DataFrame, weights):
+        tfidf_train_word_match = df.apply(
+            lambda row: HelperFunctions.tfidf_word_match_share(row, weights),
+            axis=1
+        )
+        plt.figure(figsize=(15, 5))
+        plt.hist(tfidf_train_word_match[df['is_duplicate'] == 0].fillna(0),
+                 bins=20, density=True, label='Not Duplicate')
+        plt.hist(tfidf_train_word_match[df['is_duplicate'] == 1].fillna(0),
+                 bins=20, density=True, alpha=0.7, label='Duplicate')
+        plt.legend()
+        plt.title(
+            'Label distribution over tfidf_word_match_share',
+            fontsize=15
+        )
+        plt.xlabel('word_match_share', fontsize=15)
+        plt.show()
+
+        return tfidf_train_word_match
